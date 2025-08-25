@@ -1,6 +1,9 @@
 # Dude, where are my tools?
 This addon is a little helper that remembers where you put your unbreakable tools and put that info on your login screen to find them at a quick glance.
 
+<img width="301" height="326" alt="image" src="https://github.com/user-attachments/assets/beb957d9-8666-4db5-88ca-84bc6c62b137" />
+
+
 ### Data initialization
 It is not possible to read each character's equipment while on the login screen. The addon will learn which characters have which tools while running.
 

@@ -1,0 +1,125 @@
+name: Update submodule
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-increment:
+        type: choice
+        description: Release increment type ("major", "minor", "patch", "build" or "skip" to not produce new release)
+        options: 
+        - major
+        - minor
+        - patch
+        - build
+        - skip
+
+env:
+  SUBMODULE_PATH: GW2-WhereAreMyTools
+  SUBMODULE_BRANCH: main
+  CONAN_HOME: /root/.conan2
+
+permissions:
+  contents: write
+
+jobs:
+  update-submodule:
+    runs-on: ubuntu-latest
+    container: ghcr.io/jsantorek/gw2-addon-builder:latest
+    steps:
+      - name: Checkout repository with submodule
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+
+      - name: Update submodule to latest commit
+        working-directory: ${{ env.SUBMODULE_PATH }}
+        run: |
+          set -ex
+          git fetch origin ${{ env.SUBMODULE_BRANCH }}
+          current=$(git rev-parse HEAD)
+          latest=$(git rev-parse origin/${{ env.SUBMODULE_BRANCH }})
+          [ "$current" != "$latest" ] || exit 1
+          git checkout $latest
+
+      - name: Add and commit changes
+        run: |
+          set -ex
+          git config --global --add safe.directory "$PWD"
+          git config --global user.name "${GITHUB_ACTOR}"
+          git config --global user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
+          git add ${{ env.SUBMODULE_PATH }}
+          git commit -m "chore: update submodule to latest"
+
+      - name: Conan install dependencies
+        run: >
+          conan install ${{ env.SUBMODULE_PATH }}
+          --build missing
+          --profile:host windows-dynamic
+          --profile:build default
+
+      - name: Get next semantic version
+        id: semver
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -exuo pipefail
+
+          if [[ "${{ inputs.release-increment }}" == "skip" ]]; then
+            echo "version=$(git describe --tags --dirty --always)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          latest=$(git ls-remote --tags --sort='v:refname' ${{ github.server_url }}/${{ github.repository }} | tail -n 1 | sed 's|.*refs/tags/||')
+          IFS='.' read -r major minor patch build <<< "${latest#v}"
+
+          major=${major:-0}
+          minor=${minor:-0}
+          patch=${patch:-0}
+          build=${build:-0}
+
+          case "${{ inputs.release-increment }}" in
+            major) ((major++, minor=0, patch=0, build=0))  || true ;;
+            minor) ((minor++, patch=0, build=0))  || true ;;
+            patch) ((patch++, build=0))  || true ;;
+            build) ((build++))  || true ;;
+            *) echo "Unknown release increment" >&2; exit 1 ;;
+          esac
+
+          echo "version=${major}.${minor}.${patch}.${build}" >> "$GITHUB_OUTPUT"
+
+      - name: Conan build addon
+        run: >
+          conan build ${{ env.SUBMODULE_PATH }}
+          --profile:host windows-dynamic
+          --profile:build default
+          --conf tools.cmake.cmaketoolchain:extra_variables*='{
+          "ADDON_UPDATE_LINK": "${{ github.server_url }}/${{ github.repository }}",
+          "ADDON_VERSION": "${{ steps.semver.outputs.version }}"
+          }'
+
+      - name: Push changes
+        run: git push --force
+
+      - name: Draft GitHub Release
+        if: inputs.release-increment != 'skip'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          tag_name: ${{ steps.semver.outputs.version }}
+          files: ${{ env.SUBMODULE_PATH }}/build/**/*.dll
+
+      - name: Publish GitHub Release
+        if: inputs.release-increment != 'skip'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          make_latest: true
+          draft: false
+          prerelease: false
+          tag_name: ${{ steps.semver.outputs.version }}

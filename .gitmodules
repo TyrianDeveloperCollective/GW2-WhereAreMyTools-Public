@@ -1,0 +1,3 @@
+[submodule "GW2-WhereAreMyTools"]
+	path = GW2-WhereAreMyTools
+	url = git@github.com:TyrianDeveloperCollective/GW2-WhereAreMyTools.git

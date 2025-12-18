@@ -67,7 +67,7 @@ jobs:
           set -exuo pipefail
 
           if [[ "${{ inputs.release-increment }}" == "skip" ]]; then
-            echo "version=$(git describe --tags --dirty --always)" >> "$GITHUB_OUTPUT"
+            echo "version=$(git describe --tags ${{ inputs.release-increment }}--dirty --always)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -99,8 +99,12 @@ jobs:
           "ADDON_VERSION": "${{ steps.semver.outputs.version }}"
           }'
 
-      - name: Push changes
-        run: git push --force
+      - name: Tag and push changes
+        run: |
+          if [[ "${{ inputs.release-increment }}" != "skip" ]]; then
+            git tag -a ${{ steps.semver.outputs.version }} -m "Release: ${{ inputs.release-increment }} to ${{ steps.semver.outputs.version }}"
+          fi
+          git push origin HEAD --tags
 
       - name: Draft GitHub Release
         if: inputs.release-increment != 'skip'
